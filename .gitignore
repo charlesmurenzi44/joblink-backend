@@ -1,0 +1,13 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+db.sqlite3
+.env
+firebase-credentials.json
+*.log
+staticfiles/
+media/
+joblink-25384-firebase-adminsdk-fbsvc-cd7623f235.json
+joblink-25384-firebase-adminsdk-fbsvc-f61ca3fa43.json
+*.json
