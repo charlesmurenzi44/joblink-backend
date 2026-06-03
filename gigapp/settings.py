@@ -140,3 +140,9 @@ LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'Africa/Kigali'
 USE_I18N = True
 USE_TZ = True
+# CSRF & Cookies
+CSRF_TRUSTED_ORIGINS = config('CSRF_TRUSTED_ORIGINS', default='http://localhost:3000', cast=Csv())
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True
+CSRF_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_SAMESITE = 'Lax'
