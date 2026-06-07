@@ -41,6 +41,17 @@ class MarkAllReadView(APIView):
         return Response({'message': 'All marked as read'})
 
 
+class UnreadCountView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        count = Notification.objects.filter(
+            recipient=request.user,
+            is_read=False,
+        ).count()
+        return Response({'count': count})
+
+
 class SaveFCMTokenView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 

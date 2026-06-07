@@ -1,5 +1,6 @@
 from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
+from .reviews_views import UserReviewsView
 from .views import (
     RegisterView, LoginView, ProfileView,
     WorkerProfileView, PortfolioUploadView,
@@ -15,6 +16,8 @@ from .views import (
     VerifyEmailCodeView,
     VerifyEmailTokenView,
     ResendVerificationEmailView,
+    RequestPasswordResetView,
+    ConfirmPasswordResetView,
 )
 
 urlpatterns = [
@@ -29,10 +32,13 @@ urlpatterns = [
     path('worker/portfolio/<int:pk>/delete/', DeletePortfolioPhotoView.as_view()),
     path('saved-workers/', SavedWorkerView.as_view()),
     path('my-reviews/', MyReviewsView.as_view()),
+    path('<int:user_id>/reviews/', UserReviewsView.as_view()),
     # Email Verification
     path('verify-email/code/', VerifyEmailCodeView.as_view()),
     path('verify-email/token/<uuid:token>/', VerifyEmailTokenView.as_view()),
     path('verify-email/resend/', ResendVerificationEmailView.as_view()),
+    path('password-reset/request/', RequestPasswordResetView.as_view()),
+    path('password-reset/confirm/', ConfirmPasswordResetView.as_view()),
     # Phone/ID Verification
     path('verify/send-otp/', SendOTPView.as_view()),
     path('verify/confirm-otp/', VerifyOTPView.as_view()),

@@ -1,21 +1,35 @@
+import json
+import os
+
 import firebase_admin
 from firebase_admin import credentials, messaging
 from django.conf import settings
-import os
 
 
 def _init_firebase():
-    if not firebase_admin._apps:
-        cred_path = settings.FIREBASE_CREDENTIALS
-        if os.path.exists(cred_path):
-            try:
-                cred = credentials.Certificate(cred_path)
-                firebase_admin.initialize_app(cred)
-                print('Firebase initialized ✅')
-            except Exception as e:
-                print(f'Firebase init error: {e}')
-        else:
-            print(f'Firebase credentials not found: {cred_path}')
+    if firebase_admin._apps:
+        return
+
+    json_raw = getattr(settings, 'FIREBASE_CREDENTIALS_JSON', '') or ''
+    if json_raw.strip():
+        try:
+            cred = credentials.Certificate(json.loads(json_raw))
+            firebase_admin.initialize_app(cred)
+            print('Firebase initialized from FIREBASE_CREDENTIALS_JSON')
+            return
+        except Exception as exc:
+            print(f'Firebase JSON init error: {exc}')
+
+    cred_path = settings.FIREBASE_CREDENTIALS
+    if os.path.exists(cred_path):
+        try:
+            cred = credentials.Certificate(cred_path)
+            firebase_admin.initialize_app(cred)
+            print('Firebase initialized from file')
+        except Exception as exc:
+            print(f'Firebase init error: {exc}')
+    else:
+        print(f'Firebase credentials not found: {cred_path}')
 
 
 def send_push_notification(
@@ -116,16 +130,20 @@ def send_push_to_nearby_workers(
         district: str,
         title: str,
         body: str,
-        data: dict = None):
-    """Send push to all available verified workers in district"""
+        data: dict = None,
+        skill: str = None):
+    """Send push to available workers in district, optionally filtered by skill."""
     from users.models import WorkerProfile
-    from notifications.models import FCMToken
 
     workers = WorkerProfile.objects.filter(
-        user__district=district,
+        user__district__iexact=district,
         is_available=True,
-        verification_status='verified',
+        user__is_active=True,
+        user__is_email_verified=True,
     ).select_related('user')
+
+    if skill:
+        workers = workers.filter(skill_category__icontains=skill)
 
     tokens = []
     for worker in workers:
