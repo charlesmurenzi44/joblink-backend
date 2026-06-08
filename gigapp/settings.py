@@ -9,7 +9,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = config('SECRET_KEY',
     default='django-insecure-change-this-in-production')
 
-DEBUG = config('DEBUG', default=False, cast=bool)
+DEBUG = config('DEBUG', default=True, cast=bool)
 
 ALLOWED_HOSTS = config('ALLOWED_HOSTS',
     default='*', cast=Csv())
@@ -65,14 +65,14 @@ TEMPLATES = [
 
 ASGI_APPLICATION = 'gigapp.asgi.application'
 
-# Database
+# ── Database ──────────────────────────────────────────────────────────────────
 DATABASE_URL = config('DATABASE_URL',
     default=f'sqlite:///{BASE_DIR}/db.sqlite3')
 DATABASES = {
     'default': dj_database_url.parse(DATABASE_URL)
 }
 
-# JWT
+# ── JWT ───────────────────────────────────────────────────────────────────────
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
@@ -87,10 +87,10 @@ SIMPLE_JWT = {
     'REFRESH_TOKEN_LIFETIME': timedelta(days=30),
 }
 
-# CORS
+# ── CORS ──────────────────────────────────────────────────────────────────────
 CORS_ALLOW_ALL_ORIGINS = True
 
-# Cloudinary
+# ── Cloudinary ────────────────────────────────────────────────────────────────
 import cloudinary
 CLOUDINARY_STORAGE = {
     'CLOUD_NAME': config('CLOUDINARY_CLOUD_NAME', default=''),
@@ -105,18 +105,17 @@ cloudinary.config(
     secure=True,
 )
 
-# Firebase
-FIREBASE_CREDENTIALS = os.path.join(
-    BASE_DIR, 'firebase-credentials.json')
+# ── Firebase ──────────────────────────────────────────────────────────────────
+FIREBASE_CREDENTIALS = os.path.join(BASE_DIR, 'firebase-credentials.json')
 
-# Redis / Channels
+# ── Channels / Redis ──────────────────────────────────────────────────────────
 CHANNEL_LAYERS = {
     'default': {
         'BACKEND': 'channels.layers.InMemoryChannelLayer',
     }
 }
 
-# Email
+# ── Email ─────────────────────────────────────────────────────────────────────
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = 'smtp.gmail.com'
 EMAIL_PORT = 587
@@ -124,25 +123,33 @@ EMAIL_USE_TLS = True
 EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
 DEFAULT_FROM_EMAIL = config('EMAIL_HOST_USER', default='')
-FRONTEND_URL = config('FRONTEND_URL',
-    default='http://localhost:3000')
+FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:3000')
 
-# Static files
+# ── Static / Media ────────────────────────────────────────────────────────────
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_STORAGE = (
     'whitenoise.storage.CompressedManifestStaticFilesStorage')
 
 MEDIA_URL = '/media/'
+
+# ── General ───────────────────────────────────────────────────────────────────
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 AUTH_USER_MODEL = 'users.User'
 LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'Africa/Kigali'
 USE_I18N = True
 USE_TZ = True
-# CSRF & Cookies
-CSRF_TRUSTED_ORIGINS = config('CSRF_TRUSTED_ORIGINS', default='http://localhost:3000', cast=Csv())
-SESSION_COOKIE_SECURE = True
-CSRF_COOKIE_SECURE = True
+
+# ── CSRF & Cookies ────────────────────────────────────────────────────────────
+# Secure cookies only make sense over HTTPS (production).
+# On local http://127.0.0.1 they must be False or the browser drops them.
+CSRF_TRUSTED_ORIGINS = config(
+    'CSRF_TRUSTED_ORIGINS',
+    default='http://localhost:3000,http://127.0.0.1:8000',
+    cast=Csv(),
+)
+SESSION_COOKIE_SECURE = not DEBUG   # False locally, True on Railway
+CSRF_COOKIE_SECURE = not DEBUG      # False locally, True on Railway
 CSRF_COOKIE_SAMESITE = 'Lax'
 SESSION_COOKIE_SAMESITE = 'Lax'
