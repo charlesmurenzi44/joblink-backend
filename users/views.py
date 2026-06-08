@@ -8,17 +8,16 @@ from django.contrib.auth import authenticate
 from django.utils import timezone
 from datetime import timedelta
 import uuid
-import cloudinary.uploader
 
 from .models import (
     User, WorkerProfile, WorkerPortfolio,
     SavedWorker, OTPVerification, VerificationRequest,
-    EmailVerification,
+    EmailVerification, PasswordReset,
 )
 from .otp import generate_otp, is_otp_valid
 from .email_utils import (
     generate_code, send_verification_email,
-    send_welcome_email,
+    send_welcome_email, send_password_reset_email, email_configured,
 )
 from .serializers import (
     RegisterSerializer, UserSerializer,
@@ -27,28 +26,36 @@ from .serializers import (
 )
 
 
-class RegisterView(generics.CreateAPIView):
-    serializer_class = RegisterSerializer
-    permission_classes = [permissions.AllowAny]
-
-    def perform_create(self, serializer):
-        user = serializer.save()
-        # Auto-set Kigali as default location
-        if not user.latitude:
-            user.latitude = -1.9441
-            user.longitude = 30.0619
-            user.district = 'Gasabo'
-            user.save()
-
-
 class LoginView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
-        email = request.data.get('email')
+        email = request.data.get('email', '').strip()
         password = request.data.get('password')
+
+        try:
+            existing = User.objects.get(email=email)
+        except User.DoesNotExist:
+            existing = None
+
+        if existing and not existing.is_active:
+            if existing.check_password(password):
+                return Response(
+                    {
+                        'error': 'Please verify your email before logging in.',
+                        'needs_verification': True,
+                        'email': existing.email,
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            return Response(
+                {'error': 'Invalid credentials'},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
         user = authenticate(email=email, password=password)
         if user:
+            from .profile_utils import user_has_profile_photo
             refresh = RefreshToken.for_user(user)
             user_data = UserSerializer(user).data
 
@@ -87,7 +94,14 @@ class WorkerProfileView(generics.RetrieveUpdateAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_object(self):
-        return self.request.user.worker_profile
+        profile, _ = WorkerProfile.objects.get_or_create(
+            user=self.request.user)
+        return profile
+
+    def perform_update(self, serializer):
+        profile = serializer.save()
+        from users.profile_utils import ensure_profile_photo
+        ensure_profile_photo(self.request.user)
 
 
 class PortfolioUploadView(generics.CreateAPIView):
@@ -137,22 +151,25 @@ class UploadProfilePhotoView(APIView):
                 {'error': 'No photo provided'},
                 status=400)
         try:
-            result = cloudinary.uploader.upload(
+            from users.media_utils import upload_image
+            photo_url = upload_image(
                 file,
                 folder='joblink/profiles',
                 public_id=f'user_{request.user.id}',
-                overwrite=True,
                 transformation=[
                     {'width': 400, 'height': 400,
                      'crop': 'fill', 'gravity': 'face'},
                 ],
             )
-            request.user.profile_photo = result['secure_url']
-            request.user.save()
+            request.user.profile_photo = photo_url
+            request.user.save(update_fields=['profile_photo'])
             return Response({
-                'photo_url': result['secure_url'],
-                'message': 'Photo uploaded successfully'
+                'photo_url': photo_url,
+                'profile_photo': photo_url,
+                'message': 'Photo uploaded successfully',
             })
+        except ValueError as exc:
+            return Response({'error': str(exc)}, status=503)
         except Exception as e:
             return Response({'error': str(e)}, status=500)
 
@@ -169,24 +186,26 @@ class UploadPortfolioPhotoView(APIView):
                 {'error': 'No image provided'},
                 status=400)
         try:
-            result = cloudinary.uploader.upload(
+            from users.media_utils import upload_image
+            photo_url = upload_image(
                 file,
                 folder='joblink/portfolio',
                 transformation=[
-                    {'width': 800, 'height': 600,
-                     'crop': 'fill'},
+                    {'width': 800, 'height': 600, 'crop': 'fill'},
                 ],
             )
             from .models import WorkerPortfolio
             portfolio = WorkerPortfolio.objects.create(
                 worker=request.user.worker_profile,
-                image=result['secure_url'],
+                image=photo_url,
                 description=description,
             )
             from .serializers import WorkerPortfolioSerializer
             return Response(
                 WorkerPortfolioSerializer(portfolio).data,
                 status=201)
+        except ValueError as exc:
+            return Response({'error': str(exc)}, status=503)
         except Exception as e:
             return Response({'error': str(e)}, status=500)
 
@@ -212,21 +231,50 @@ class SendOTPView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
+        from datetime import timedelta
+
+        from django.conf import settings
+        from django.utils import timezone
+
+        from .phone_utils import normalize_phone
+        from .sms_utils import SmsDeliveryError, send_sms, sms_configured
+
         user = request.user
+
+        try:
+            existing = user.otp
+            if timezone.now() - existing.created_at < timedelta(seconds=60):
+                return Response(
+                    {'error': 'Wait 60 seconds before requesting another code.'},
+                    status=429,
+                )
+        except OTPVerification.DoesNotExist:
+            pass
+
         code = generate_otp()
         OTPVerification.objects.update_or_create(
             user=user,
             defaults={'code': code, 'is_verified': False},
         )
-        # In production send via SMS (Africa's Talking etc)
-        # For now print to console
-        print(f"\n{'='*40}")
-        print(f"OTP for {user.full_name}: {code}")
-        print(f"{'='*40}\n")
-        return Response({
-            'message': f'OTP sent to {user.phone_number}',
-            'dev_otp': code,  # remove in production
-        })
+        message = (
+            f'Your JobLink verification code is {code}. '
+            f'Valid for 10 minutes.'
+        )
+
+        try:
+            sms_sent = send_sms(user.phone_number, message)
+        except SmsDeliveryError as exc:
+            return Response({'error': str(exc)}, status=503)
+
+        phone_display = normalize_phone(user.phone_number) or user.phone_number
+        payload = {
+            'message': f'OTP sent to {phone_display}',
+            'sms_sent': sms_sent,
+            'sms_configured': sms_configured(),
+        }
+        if not sms_sent and (settings.DEBUG or not sms_configured()):
+            payload['dev_otp'] = code
+        return Response(payload)
 
 
 class VerifyOTPView(APIView):
@@ -294,26 +342,23 @@ class SubmitVerificationView(APIView):
                 status=400)
 
         try:
-            # Upload ID photo
-            id_result = cloudinary.uploader.upload(
+            from users.media_utils import upload_image
+            id_url = upload_image(
                 id_photo,
                 folder='joblink/verifications/ids',
                 public_id=f'id_{user.id}',
-                overwrite=True,
             )
-            # Upload selfie
-            selfie_result = cloudinary.uploader.upload(
+            selfie_url = upload_image(
                 selfie,
                 folder='joblink/verifications/selfies',
                 public_id=f'selfie_{user.id}',
-                overwrite=True,
             )
 
             VerificationRequest.objects.update_or_create(
                 worker=user,
                 defaults={
-                    'id_photo': id_result['secure_url'],
-                    'selfie_photo': selfie_result['secure_url'],
+                    'id_photo': id_url,
+                    'selfie_photo': selfie_url,
                     'id_number': id_number,
                     'phone_verified': True,
                     'status': 'pending',
@@ -336,6 +381,8 @@ class SubmitVerificationView(APIView):
             return Response({
                 'message': 'Verification submitted! We will review within 24 hours.'
             })
+        except ValueError as exc:
+            return Response({'error': str(exc)}, status=503)
         except Exception as e:
             return Response({'error': str(e)}, status=500)
 
@@ -344,21 +391,32 @@ class VerificationStatusView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
+        phone_verified = False
+        try:
+            phone_verified = request.user.otp.is_verified
+        except OTPVerification.DoesNotExist:
+            pass
+
         try:
             vr = request.user.verification_request
             wp = request.user.worker_profile
             return Response({
                 'status': vr.status,
-                'phone_verified': vr.phone_verified,
+                'phone_verified': phone_verified or vr.phone_verified,
                 'submitted_at': vr.submitted_at,
                 'admin_note': vr.admin_note,
                 'verification_status': wp.verification_status,
             })
         except VerificationRequest.DoesNotExist:
+            try:
+                wp = request.user.worker_profile
+                vstatus = wp.verification_status
+            except WorkerProfile.DoesNotExist:
+                vstatus = 'pending'
             return Response({
                 'status': 'not_submitted',
-                'phone_verified': False,
-                'verification_status': 'pending',
+                'phone_verified': phone_verified,
+                'verification_status': vstatus,
             })
 
 
@@ -432,79 +490,187 @@ class AdminReviewVerificationView(APIView):
         })         
 
 
+class RequestPasswordResetView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        email = (request.data.get('email') or '').strip()
+        if not email:
+            return Response({'error': 'Email is required'}, status=400)
+
+        try:
+            user = User.objects.get(email__iexact=email)
+        except User.DoesNotExist:
+            return Response({
+                'message': 'If that email exists, a reset code was sent.',
+            })
+
+        code = generate_code()
+        token = uuid.uuid4()
+        PasswordReset.objects.create(user=user, code=code, token=token)
+        sent, mail_error = send_password_reset_email(user, code, token)
+
+        from django.conf import settings
+        payload = {
+            'message': 'If that email exists, a reset code was sent.',
+            'email_sent': sent,
+        }
+        if not sent and (settings.DEBUG or not email_configured()):
+            payload['dev_reset_code'] = code
+        if email_configured() and mail_error and not sent:
+            payload['error'] = mail_error
+        return Response(payload)
+
+
+class ConfirmPasswordResetView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        email = (request.data.get('email') or '').strip()
+        code = str(request.data.get('code') or '').strip()
+        password = request.data.get('password') or ''
+        password2 = request.data.get('password2') or password
+
+        if not email or not code or not password:
+            return Response(
+                {'error': 'Email, code, and password are required'},
+                status=400,
+            )
+        if password != password2:
+            return Response({'error': 'Passwords do not match'}, status=400)
+        if len(password) < 8:
+            return Response(
+                {'error': 'Password must be at least 8 characters'},
+                status=400,
+            )
+
+        try:
+            user = User.objects.get(email__iexact=email)
+        except User.DoesNotExist:
+            return Response({'error': 'Invalid email or code'}, status=400)
+
+        reset = (
+            PasswordReset.objects.filter(
+                user=user, is_used=False,
+            ).order_by('-created_at').first()
+        )
+        if not reset or reset.code.strip() != code:
+            return Response({'error': 'Invalid email or code'}, status=400)
+
+        if timezone.now() - reset.created_at > timedelta(minutes=15):
+            return Response({'error': 'Code expired. Request a new one.'}, status=400)
+
+        user.set_password(password)
+        user.save()
+        reset.is_used = True
+        reset.save(update_fields=['is_used'])
+
+        return Response({'message': 'Password reset! You can now log in.'})
+
+
 
 class RegisterView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
     permission_classes = [permissions.AllowAny]
 
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        user = serializer.instance
+        user.refresh_from_db()
+        code = user.email_verification.code
+        sent, mail_error = send_verification_email(user, code, user.email_verification.token)
+        from django.conf import settings
+        from .email_utils import email_configured
+        payload = {
+            'message': (
+                'Registration successful. Check your email for the verification code.'
+                if sent or email_configured()
+                else 'Registration successful. Email is not configured — use the dev code below.'
+            ),
+            'email': user.email,
+            'email_sent': sent,
+            'email_configured': email_configured(),
+        }
+        if not sent:
+            if email_configured() and mail_error:
+                payload['error'] = f'Could not send email: {mail_error}'
+            if settings.DEBUG or not email_configured():
+                payload['dev_verification_code'] = code
+        return Response(payload, status=status.HTTP_201_CREATED)
+
     def perform_create(self, serializer):
         user = serializer.save()
 
-        # Set default location
+        user.is_active = False
+        user.is_email_verified = False
         if not user.latitude:
             user.latitude = -1.9441
             user.longitude = 30.0619
             user.district = 'Gasabo'
-            user.is_active = False  # inactive until verified
-            user.save()
+        user.save()
 
         # Create email verification
         code = generate_code()
-        import uuid
         token = uuid.uuid4()
-        EmailVerification.objects.update_or_create(
+        ev, _ = EmailVerification.objects.update_or_create(
             user=user,
             defaults={
                 'code': code,
                 'token': token,
                 'is_verified': False,
-            }
+            },
         )
-
-        # Send verification email
-        send_verification_email(user, code, token)
+        ev.save()
 
 
 class VerifyEmailCodeView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
-        email = request.data.get('email')
-        code = request.data.get('code')
+        email = (request.data.get('email') or '').strip()
+        code = str(request.data.get('code') or '').strip()
+
+        if not email or not code:
+            return Response(
+                {'error': 'Email and code are required'},
+                status=400)
 
         try:
-            user = User.objects.get(email=email)
+            user = User.objects.get(email__iexact=email)
             ev = user.email_verification
-        except (User.DoesNotExist,
-                EmailVerification.DoesNotExist):
+        except (User.DoesNotExist, EmailVerification.DoesNotExist):
             return Response(
                 {'error': 'Invalid email or code'},
                 status=400)
 
-        # Check expiry (10 minutes)
+        if user.is_email_verified and user.is_active:
+            return Response({
+                'message': 'Email already verified! You can login.',
+            })
+
         expiry = ev.created_at + timedelta(minutes=10)
         if timezone.now() > expiry:
             return Response(
-                {'error': 'Code expired. Request a new one.'},
+                {'error': 'Code expired. Tap "Resend code" for a new one.'},
                 status=400)
 
-        if ev.code != code:
+        if ev.code.strip() != code:
             return Response(
-                {'error': 'Invalid code'},
+                {'error': 'Invalid code. Check your email and try again.'},
                 status=400)
 
-        # Activate user
         ev.is_verified = True
         ev.save()
         user.is_email_verified = True
         user.is_active = True
         user.save()
 
-        # Send welcome email
         send_welcome_email(user)
 
         return Response({
-            'message': 'Email verified! You can now login. 🎉'
+            'message': 'Email verified! You can now login.'
         })
 
 
@@ -549,9 +715,12 @@ class ResendVerificationEmailView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
-        email = request.data.get('email')
+        email = (request.data.get('email') or '').strip()
+        if not email:
+            return Response({'error': 'Email is required'}, status=400)
+
         try:
-            user = User.objects.get(email=email)
+            user = User.objects.get(email__iexact=email)
         except User.DoesNotExist:
             return Response(
                 {'error': 'Email not found'},
@@ -561,19 +730,34 @@ class ResendVerificationEmailView(APIView):
             return Response(
                 {'message': 'Email already verified'})
 
-        import uuid
         code = generate_code()
         token = uuid.uuid4()
-        EmailVerification.objects.update_or_create(
+        ev, _ = EmailVerification.objects.update_or_create(
             user=user,
             defaults={
                 'code': code,
                 'token': token,
                 'is_verified': False,
-            }
+            },
         )
-        send_verification_email(user, code, token)
+        ev.save()
 
-        return Response({
-            'message': f'Verification email resent to {email}'
-        })       
+        sent, mail_error = send_verification_email(user, code, token)
+
+        from django.conf import settings
+        from .email_utils import email_configured
+        payload = {
+            'message': (
+                f'Verification email resent to {user.email}'
+                if sent
+                else 'Could not send email. Try again or use the dev code.'
+            ),
+            'email': user.email,
+            'email_sent': sent,
+            'email_configured': email_configured(),
+        }
+        if not sent and (settings.DEBUG or not email_configured()):
+            payload['dev_verification_code'] = code
+        if email_configured() and mail_error and not sent:
+            payload['error'] = f'Could not send email: {mail_error}'
+        return Response(payload)

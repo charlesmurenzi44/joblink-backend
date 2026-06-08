@@ -9,6 +9,7 @@ def notify_user(recipient, notification_type: str, title: str, body: str, data: 
         notification_type=notification_type,
         title=title,
         body=body,
+        data=data or {},
     )
 
     # Send push notification

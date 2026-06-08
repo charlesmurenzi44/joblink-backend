@@ -41,6 +41,11 @@ class User(AbstractBaseUser, PermissionsMixin):
     is_staff = models.BooleanField(default=False)
     date_joined = models.DateTimeField(auto_now_add=True)
 
+    # Ratings received as an employer (from workers)
+    employer_average_rating = models.DecimalField(
+        max_digits=3, decimal_places=2, default=0.00)
+    employer_total_reviews = models.PositiveIntegerField(default=0)
+
     objects = UserManager()
 
     USERNAME_FIELD = 'email'
@@ -59,7 +64,9 @@ class WorkerProfile(models.Model):
 
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='worker_profile')
     bio = models.TextField(blank=True)
-    skill_category = models.CharField(max_length=100)  # e.g Electrician, Plumber
+    skill_category = models.CharField(
+        max_length=100, blank=True, default='',
+    )  # e.g Electrician, Plumber — set during onboarding
     experience_years = models.PositiveIntegerField(default=0)
     daily_rate = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     hourly_rate = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
@@ -155,3 +162,15 @@ class EmailVerification(models.Model):
 
     def __str__(self):
         return f"EmailVerification for {self.user.email}"
+
+
+class PasswordReset(models.Model):
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name='password_resets')
+    code = models.CharField(max_length=6)
+    token = models.UUIDField(default=uuid.uuid4)
+    is_used = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f'PasswordReset for {self.user.email}'

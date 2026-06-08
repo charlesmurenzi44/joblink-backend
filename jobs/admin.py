@@ -1,6 +1,5 @@
 from django.contrib import admin
-from .models import Job, JobApplication, Review, JobCategory
-from .models import Job, JobApplication, Review, JobCategory, Report
+from .models import Job, JobApplication, Review, JobCategory, Report, JobActivity
 
 
 @admin.register(JobCategory)
@@ -11,8 +10,8 @@ class JobCategoryAdmin(admin.ModelAdmin):
 
 @admin.register(Job)
 class JobAdmin(admin.ModelAdmin):
-    list_display = ['title', 'client', 'category', 'status', 'is_emergency', 'district', 'created_at']
-    list_filter = ['status', 'is_emergency', 'payment_method', 'category']
+    list_display = ['title', 'client', 'category', 'status', 'payment_status', 'is_emergency', 'district', 'created_at']
+    list_filter = ['status', 'payment_status', 'is_emergency', 'payment_method', 'category']
     search_fields = ['title', 'client__full_name', 'district']
     ordering = ['-created_at']
 
@@ -42,4 +41,11 @@ class ReportAdmin(admin.ModelAdmin):
 
     def mark_dismissed(self, request, queryset):
         queryset.update(status='dismissed')
-    mark_dismissed.short_description = 'Mark selected as dismissed'    
+    mark_dismissed.short_description = 'Mark selected as dismissed'
+
+
+@admin.register(JobActivity)
+class JobActivityAdmin(admin.ModelAdmin):
+    list_display = ['job', 'event_type', 'actor', 'created_at']
+    list_filter = ['event_type']
+    search_fields = ['job__title', 'message']    
