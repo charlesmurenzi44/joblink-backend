@@ -8,6 +8,8 @@ class Notification(models.Model):
         ('job_accepted', 'Job Accepted'),
         ('job_completed', 'Job Completed'),
         ('new_application', 'New Application'),
+        ('application_submitted', 'Application Submitted'),
+        ('application_rejected', 'Application Rejected'),
         ('new_message', 'New Message'),
         ('emergency_job', 'Emergency Job Nearby'),
         ('review_received', 'Review Received'),

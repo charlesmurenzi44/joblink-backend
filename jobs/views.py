@@ -386,8 +386,17 @@ class JobApplicationView(generics.ListCreateAPIView):
                 else JobApplicationSerializer)
 
     def get_queryset(self):
-        return JobApplication.objects.filter(
-            job_id=self.kwargs.get('job_id'))
+        job_id = self.kwargs.get('job_id')
+        user = self.request.user
+        if user.role == 'client':
+            return JobApplication.objects.filter(
+                job_id=job_id, job__client=user)
+        if user.role == 'worker':
+            wp = WorkerProfile.objects.filter(user=user).first()
+            if wp is None:
+                return JobApplication.objects.none()
+            return JobApplication.objects.filter(job_id=job_id, worker=wp)
+        return JobApplication.objects.none()
 
     def perform_create(self, serializer):
         user = self.request.user
@@ -413,17 +422,19 @@ class JobApplicationView(generics.ListCreateAPIView):
 
         job = Job.objects.get(pk=self.kwargs['job_id'])
 
-        # Check if already applied
-        if JobApplication.objects.filter(
-                job=job,
-                worker=wp).exists():
+        if job.status != 'posted':
+            raise ValidationError(
+                {'detail': 'This job is no longer accepting applications.'})
+
+        if job.worker_id is not None:
+            raise ValidationError(
+                {'detail': 'This job already has a hired worker.'})
+
+        if JobApplication.objects.filter(job=job, worker=wp).exists():
             raise ValidationError(
                 {'detail': 'You already applied for this job'})
 
-        serializer.save(
-            worker=wp,
-            job=job,
-        )
+        application = serializer.save(worker=wp, job=job)
 
         log_job_activity(
             job,
@@ -437,7 +448,15 @@ class JobApplicationView(generics.ListCreateAPIView):
             notification_type='new_application',
             title='New Application! 📋',
             body=f'{user.full_name} applied for "{job.title}"',
-            data={'job_id': str(job.id)},
+            data={'job_id': str(job.id), 'application_id': str(application.id)},
+        )
+
+        notify_user(
+            recipient=user,
+            notification_type='application_submitted',
+            title='Application sent ✓',
+            body=f'Your application for "{job.title}" is pending review.',
+            data={'job_id': str(job.id), 'application_id': str(application.id)},
         )
 
 
@@ -468,10 +487,20 @@ class AcceptApplicationView(APIView):
                 {'error': 'Only the job owner can accept applications'},
                 status=403)
 
+        if application.status != 'pending':
+            return Response(
+                {'error': 'This application was already reviewed.'},
+                status=400)
+
+        job = application.job
+        if job.status != 'posted':
+            return Response(
+                {'error': 'This job is no longer open for hiring.'},
+                status=400)
+
         application.status = 'accepted'
         application.save()
 
-        job = application.job
         job.worker = application.worker
         job.status = 'accepted'
         job.payment_status = 'held'
@@ -518,10 +547,10 @@ class AcceptApplicationView(APIView):
         for app in rejected_apps:
             notify_user(
                 recipient=app.worker.user,
-                notification_type='new_application',
-                title='Application Update',
+                notification_type='application_rejected',
+                title='Application not selected',
                 body=f'Your application for "{job.title}" was not selected.',
-                data={'job_id': str(job.id)},
+                data={'job_id': str(job.id), 'application_id': str(app.id)},
             )
 
         return Response({'message': 'Worker hired successfully'})
@@ -543,15 +572,26 @@ class RejectApplicationView(APIView):
                 {'error': 'Only the job owner can reject applications'},
                 status=403)
 
+        if application.status != 'pending':
+            return Response(
+                {'error': 'This application was already reviewed.'},
+                status=400)
+
         application.status = 'rejected'
         application.save()
 
         notify_user(
             recipient=application.worker.user,
-            notification_type='new_application',
-            title='Application Update',
-            body=f'Your application for "{application.job.title}" was not selected.',
-            data={'job_id': str(application.job.id)},
+            notification_type='application_rejected',
+            title='Application declined',
+            body=(
+                f'Your application for "{application.job.title}" '
+                f'was declined by the client.'
+            ),
+            data={
+                'job_id': str(application.job.id),
+                'application_id': str(application.id),
+            },
         )
 
         return Response(JobApplicationSerializer(application).data)
@@ -562,8 +602,11 @@ class WorkerApplicationsView(generics.ListAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
+        wp = WorkerProfile.objects.filter(user=self.request.user).first()
+        if wp is None:
+            return JobApplication.objects.none()
         return JobApplication.objects.filter(
-            worker=self.request.user.worker_profile
+            worker=wp,
         ).order_by('-applied_at')
 
 
