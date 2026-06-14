@@ -34,6 +34,14 @@ class CreateJobSerializer(serializers.ModelSerializer):
     class Meta:
         model = Job
         exclude = ['client', 'worker', 'status', 'payment_status']
+        extra_kwargs = {
+            'budget': {'required': False, 'allow_null': True},
+            'latitude': {'required': False, 'allow_null': True},
+            'longitude': {'required': False, 'allow_null': True},
+            'scheduled_date': {'required': False, 'allow_null': True},
+            'work_end_date': {'required': False, 'allow_null': True},
+            'description': {'required': False, 'allow_blank': True},
+        }
 
     def validate(self, attrs):
         start = attrs.get('scheduled_date')
