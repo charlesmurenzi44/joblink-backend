@@ -78,6 +78,8 @@ TEMPLATES = [
 ]
 
 ASGI_APPLICATION = 'gigapp.asgi.application'
+WSGI_APPLICATION = 'gigapp.wsgi.application'
+
 
 # ── Database ──────────────────────────────────────────────────────────────────
 DATABASE_URL = config('DATABASE_URL',
