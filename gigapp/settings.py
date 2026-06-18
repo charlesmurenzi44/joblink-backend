@@ -1,18 +1,12 @@
 from pathlib import Path
 from datetime import timedelta
 import os
-from decouple import Config, Csv, RepositoryEnv
+from decouple import AutoConfig, Csv, RepositoryEnv
 import dj_database_url
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Always load .env from the backend project root (not the shell cwd).
-_env_file = BASE_DIR / '.env'
-config = (
-    Config(RepositoryEnv(str(_env_file)))
-    if _env_file.is_file()
-    else Config()
-)
+config = AutoConfig(search_path=BASE_DIR)
 
 SECRET_KEY = config('SECRET_KEY',
     default='django-insecure-change-this-in-production')
