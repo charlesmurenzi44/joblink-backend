@@ -32,10 +32,12 @@ class User(AbstractBaseUser, PermissionsMixin):
     is_email_verified = models.BooleanField(default=False)
 
     # Location
-    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
-    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
     district = models.CharField(max_length=100, blank=True)  # e.g Gasabo, Rulindo
     sector = models.CharField(max_length=100, blank=True)    # e.g Kimironko
+    cell = models.CharField(max_length=100, blank=True)      # e.g Kibagabaga
+    village = models.CharField(max_length=100, blank=True)   # e.g Ingenzi
 
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)

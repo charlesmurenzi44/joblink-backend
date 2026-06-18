@@ -76,6 +76,7 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = ['id', 'email', 'full_name', 'phone_number', 'role',
                   'profile_photo', 'has_profile_photo', 'district', 'sector',
+                  'cell', 'village',
                   'latitude', 'longitude', 'is_staff', 'is_active',
                   'employer_average_rating', 'employer_total_reviews']
 
@@ -119,4 +120,4 @@ class VerificationRequestSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = VerificationRequest
-        fields = '__all__'        
+        fields = '__all__'

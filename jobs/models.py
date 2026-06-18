@@ -40,10 +40,12 @@ class Job(models.Model):
     status = models.CharField(max_length=15, choices=STATUS_CHOICES, default='posted')
 
     # Location
-    latitude = models.DecimalField(max_digits=9, decimal_places=6)
-    longitude = models.DecimalField(max_digits=9, decimal_places=6)
+    latitude = models.DecimalField(max_digits=10, decimal_places=7)
+    longitude = models.DecimalField(max_digits=10, decimal_places=7)
     district = models.CharField(max_length=100)
     sector = models.CharField(max_length=100, blank=True)
+    cell = models.CharField(max_length=100, null=True, blank=True)
+    village = models.CharField(max_length=100, null=True, blank=True)
     address = models.CharField(max_length=255, blank=True)
 
     # Payment
