@@ -14,7 +14,7 @@ SECRET_KEY = config('SECRET_KEY',
 DEBUG = config('DEBUG', default=True, cast=bool)
 
 # Railway / production hosts
-_default_hosts = 'localhost,127.0.0.1,.up.railway.app' if not DEBUG else '*'
+_default_hosts = 'localhost,127.0.0.1,.up.railway.app,.railway.app' if not DEBUG else '*'
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default=_default_hosts, cast=Csv())
 
 RAILWAY_PUBLIC_DOMAIN = config('RAILWAY_PUBLIC_DOMAIN', default='')
